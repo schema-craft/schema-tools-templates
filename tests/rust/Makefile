@@ -30,7 +30,7 @@ codegen: install-dependencies format
 		-c 'process merge-all-of - --leave-invalid-properties --filter "x-skip!=true"' \
 		-c 'process name - --overwrite --resource-method-version' \
 		-c 'codegen openapi - --template templates::rust/_common/ --template templates::rust/server-actix/ ${FORMAT} --target-dir src/ -o qs=serde_qs --merge-similar-models' \
-		-c 'codegen openapi - --template templates::rust/_common/ --template templates::rust/client/ --format "rustfmt --edition 2021" --target-dir src/client/ --merge-similar-models -o qs=serde_qs -o apm=tracing-opentelemetry -o namespace=devices -o name=DevicesClient'
+		-c 'codegen openapi - --template templates::rust/_common/ --template templates::rust/client/ --format "rustfmt --edition 2021" --target-dir src/client/ --merge-similar-models -o qs=serde_qs -o apm=tracing-opentelemetry -o custom_headers=true -o namespace=devices -o name=DevicesClient'
 
 install-dependencies: platform
 	@echo installing dependencies ...

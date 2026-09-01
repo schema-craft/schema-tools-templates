@@ -3,6 +3,7 @@
 {% set_global apm = options.apm | default(value = []) %}
 {% set_global qs = options.qs | default(value = "serde_urlencoded") %}
 {% set_global qs_mode = options.qs_mode | default(value = "empty_indexed") %}
+{% set_global custom_headers_enabled = options.custom_headers | default(value = "") == "true" %}
 
 {% set filtered_endpoints = endpoints %}
 
@@ -10,7 +11,6 @@ use std::collections::HashMap;
 use reqwest::header::{HeaderName, HeaderValue};
 use reqwest::Method;
 use super::error::{ApiError, ApiResponseError, ClientError, ResponseProcessingError};
-use std::collections::BTreeMap;
 {% if "tracing" in apm %}
 {% set_global apm_prefix = options.apmPrefix | default(value = "") %}
 {%- if apm_prefix != "" %}
@@ -71,6 +71,7 @@ impl {{ options.name }} {
         {%- if endpoint.requestbody?.models?["default"] %} body: {{ <type property={endpoint.requestbody?.models?["default"]?.model} ns="model"/> }}, {% endif -%}
         {%- if endpoint.parameters.query | length > 0 %} query: endpoint::{{ endpoint.operation | pascalcase }}Query, {% endif %}
         {%- if filtered_headers | length > 0 %} headers: endpoint::{{ endpoint.operation | pascalcase }}Headers, {% endif %}
+        {%- if custom_headers_enabled %} custom_headers: Option<HashMap<String, String>>, {% endif %}
     ) -> {{ <endpoint_return success={success} endpoint={endpoint} headers={success_headers} options={options}/> }} {
         {% if "tracing" in apm %}
         let span = tracing::info_span!(
@@ -92,39 +93,57 @@ impl {{ options.name }} {
         ));
 
         // setup headers
-        let mut final_headers = vec![{% if success != "no-models" %}(
+        let mut final_headers = HashMap::<HeaderName, HeaderValue>::new();
+        {% if success != "no-models" %}final_headers.insert(
             HeaderName::from_static("accept"),
             HeaderValue::from_static("{{ success.contentType }}"),
-        ),{% endif %}{%- if endpoint.requestbody?.models?["default"] %}(
+        );{% endif %}
+        {%- if endpoint.requestbody?.models?["default"] %}final_headers.insert(
             HeaderName::from_static("content-type"),
             HeaderValue::from_static("{{ endpoint.requestbody?.models?["default"]?.contentType }}"),
-        ),
-        {% endif %}];
+        );
+        {% endif %}
 
         {% if "opentelemetry" in apm %}
         // trace context opentelemetry propagation
         let current_context = Span::current().context();
         let mut trace_headers = HashMap::new();
         TraceContextPropagator::new().inject_context(&current_context, &mut trace_headers);
-        final_headers.append(&mut trace_headers
+        final_headers.extend(
+            trace_headers
                 .iter()
                 .map(|(name, val)| (HeaderName::from_bytes(name.as_ref()), HeaderValue::from_bytes(val.as_ref())))
                 .filter(|(k, v)| k.is_ok() && v.is_ok())
                 .map(|(k, v)| (k.unwrap(), v.unwrap()))
-                .collect::<Vec<_>>());
+        );
         {% endif %}
 
         {%- if filtered_headers | length > 0 %}
-        final_headers.append(&mut headers.into_vec());
+        final_headers.extend(headers.into_vec());
         {% endif %}
 
         {% for sec in endpoint.security %}
         if let Some(auth_headers) = self.auth.get("{{ sec.scheme_name }}") {
-            final_headers.append(
-                &mut auth_headers.clone().into_iter().collect::<Vec<_>>()
-            );
+            final_headers.extend(auth_headers.clone());
         }
         {% endfor %}
+
+        {%- if custom_headers_enabled %}
+        if let Some(custom_headers) = custom_headers {
+            final_headers.extend(
+                custom_headers
+                    .iter()
+                    .map(|(name, val)| {
+                        (
+                            HeaderName::from_bytes(name.as_bytes()),
+                            HeaderValue::from_str(val),
+                        )
+                    })
+                    .filter(|(k, v)| k.is_ok() && v.is_ok())
+                    .map(|(k, v)| (k.unwrap(), v.unwrap())),
+            );
+        }
+        {%- endif %}
 
         {{ <client_endpoint_block endpoint={endpoint} options={options}/> }}
 
@@ -136,9 +155,8 @@ impl {{ options.name }} {
                 {%- if endpoint.requestbody?.models?["default"] %}.json(&body){% endif -%}
                 .headers(
                     final_headers
-                        .iter()
-                        .cloned()
-                        .collect()
+                        .into_iter()
+                        .collect::<reqwest::header::HeaderMap>()
                 )
                 {% if qs in ["serde_qs", "serde_qs_1"] %}.build().map_err(|e| {
                     {% if "tracing" in apm %}tracing::error!("reqwest failed(): {}", e);{% endif %}

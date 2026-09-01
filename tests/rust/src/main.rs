@@ -241,7 +241,10 @@ mod tests {
             .with_auth_basic_auth("testing");
 
         let result = client
-            .devices_list_v1(client::devices::endpoint::DevicesListV1Query::default())
+            .devices_list_v1(
+                client::devices::endpoint::DevicesListV1Query::default(),
+                None,
+            )
             .await;
 
         assert_eq!(result.is_err(), false);
@@ -258,13 +261,16 @@ mod tests {
             .with_auth_basic_auth("testing");
 
         let result = client
-            .devices_list_v1(client::devices::endpoint::DevicesListV1Query {
-                filter: Some(client::devices::model::ListDevicesFilterQueryParameter {
-                    device_id: Some("a9604d6a-3f76-476b-bfbf-97a940e879d8".to_string()),
+            .devices_list_v1(
+                client::devices::endpoint::DevicesListV1Query {
+                    filter: Some(client::devices::model::ListDevicesFilterQueryParameter {
+                        device_id: Some("a9604d6a-3f76-476b-bfbf-97a940e879d8".to_string()),
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                ..Default::default()
-            })
+                },
+                None,
+            )
             .await;
 
         assert_eq!(result.is_err(), false);
@@ -284,10 +290,13 @@ mod tests {
             .with_auth_basic_auth("testing");
 
         let result = client
-            .devices_list_v1(client::devices::endpoint::DevicesListV1Query {
-                page: Some(2),
-                ..Default::default()
-            })
+            .devices_list_v1(
+                client::devices::endpoint::DevicesListV1Query {
+                    page: Some(2),
+                    ..Default::default()
+                },
+                None,
+            )
             .await;
 
         assert_eq!(result.is_err(), false);
@@ -307,10 +316,13 @@ mod tests {
             .with_auth_basic_auth("testing");
 
         let result = client
-            .devices_list_v1(client::devices::endpoint::DevicesListV1Query {
-                for_: Some("test".to_string()),
-                ..Default::default()
-            })
+            .devices_list_v1(
+                client::devices::endpoint::DevicesListV1Query {
+                    for_: Some("test".to_string()),
+                    ..Default::default()
+                },
+                None,
+            )
             .await;
 
         assert_eq!(result.is_err(), false);
@@ -330,7 +342,7 @@ mod tests {
             .with_auth_basic_auth("testing");
 
         let result = client
-            .accessory_get_v1("1111".to_string())
+            .accessory_get_v1("1111".to_string(), None)
             .await;
 
         assert_eq!(result.is_err(), false);
@@ -353,7 +365,7 @@ mod tests {
             .with_auth_basic_auth("testing");
 
         let result = client
-            .accessory_get_v1("invalid".to_string())
+            .accessory_get_v1("invalid".to_string(), None)
             .await;
 
         assert_eq!(result.is_err(), true);
@@ -375,7 +387,7 @@ mod tests {
 
         let client = super::client::devices::DevicesClient::new(uri, reqwest::Client::new());
 
-        let result = client.device_get_v1("missing".to_string()).await;
+        let result = client.device_get_v1("missing".to_string(), None).await;
 
         let error = result.unwrap_err();
         let _expected = ClientError::Error(
@@ -399,7 +411,7 @@ mod tests {
 
         let client = super::client::devices::DevicesClient::new(uri, reqwest::Client::new());
 
-        let result = client.accessory_log_list_v1("missing".to_string()).await;
+        let result = client.accessory_log_list_v1("missing".to_string(), None).await;
         assert_eq!(false, result.is_err());
 
         let data = result.unwrap();
@@ -415,9 +427,12 @@ mod tests {
 
         let client = super::client::devices::DevicesClient::new(uri, reqwest::Client::new());
 
-        let result = client.accessory_create_v1(super::client::devices::model::Accessory::new(
-            "conflict".to_string(),
-        )).await;
+        let result = client.accessory_create_v1(
+            super::client::devices::model::Accessory::new(
+                "conflict".to_string(),
+            ),
+            None,
+        ).await;
 
         assert_eq!(true, result.is_err());
 
@@ -443,9 +458,12 @@ mod tests {
 
         let client = super::client::devices::DevicesClient::new(uri, reqwest::Client::new());
 
-        let result = client.accessory_create_v1(super::client::devices::model::Accessory::new(
-            "error".to_string(),
-        )).await;
+        let result = client.accessory_create_v1(
+            super::client::devices::model::Accessory::new(
+                "error".to_string(),
+            ),
+            None,
+        ).await;
 
         assert_eq!(true, result.is_err());
 
@@ -471,7 +489,7 @@ mod tests {
 
         let client = super::client::devices::DevicesClient::new(uri, reqwest::Client::new());
 
-        let result = client.device_get_v1("existing".to_string()).await;
+        let result = client.device_get_v1("existing".to_string(), None).await;
         let device = result.unwrap();
 
         assert!(matches!(device.data.device_class_type, client::devices::model::DeviceDeviceClassTypeVariant::DeviceDeviceClassType10));
@@ -492,7 +510,8 @@ mod tests {
             super::client::devices::model::Device {
                 device_id: "test".to_string(),
                 device_class_type: super::client::devices::model::DeviceDeviceClassTypeVariant::DeviceDeviceClassType20,
-            }
+            },
+            None,
         ).await;
 
         assert_eq!(result.is_err(), false);
@@ -514,7 +533,8 @@ mod tests {
             super::client::devices::model::Device {
                 device_id: "test".to_string(),
                 device_class_type: super::client::devices::model::DeviceDeviceClassTypeVariant::DeviceDeviceClassType20,
-            }
+            },
+            None,
         ).await;
 
         assert_eq!(result.is_err(), false);
@@ -522,5 +542,23 @@ mod tests {
         let data = result.unwrap();
 
         assert_eq!(data.response.status().as_u16(), 201);
+    }
+
+    #[actix_web::test]
+    async fn test_custom_headers() {
+        let uri = run_server(web::Data::new(Database {}), web::Data::new(Repository {}))
+            .await
+            .expect("Cannot run server");
+
+        let client = super::client::devices::DevicesClient::new(uri, reqwest::Client::new());
+
+        let mut custom_headers = std::collections::HashMap::new();
+        custom_headers.insert("x-custom-header".to_string(), "custom-value".to_string());
+
+        let result = client
+            .device_get_v1("existing".to_string(), Some(custom_headers))
+            .await;
+
+        assert_eq!(result.is_err(), false);
     }
 }
