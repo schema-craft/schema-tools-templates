@@ -986,4 +986,45 @@ mod tests {
 
         assert_eq!(original, expected);
     }
+
+    #[test]
+    fn test_string_enum_default() {
+        // Status enum has default: 'DOWN'
+        let default_variant = api::model::ServiceStatusStatusVariant::default();
+        assert_eq!(default_variant.as_ref(), "DOWN");
+    }
+
+    #[test]
+    fn test_integer_enum_default() {
+        // DeviceDeviceClassType enum has default: 0
+        let default_variant = api::model::DeviceDeviceClassTypeVariant::default();
+        assert_eq!(default_variant.as_ref(), "0");
+    }
+
+    #[test]
+    fn test_integer_enum_default_non_zero() {
+        // PageSize enum has default: 10
+        let default_variant = api::model::PaginationPageSizeVariant::default();
+        assert_eq!(default_variant.as_ref(), "10");
+    }
+
+    #[test]
+    fn test_string_enum_default_serde_rename() {
+        // StrTypeEnum has default: test2
+        let default_variant =
+            api::model::LocationKindExternallyTaggedWithStrEnumOption2StrVariant::default();
+        assert_eq!(default_variant.as_ref(), "test2");
+    }
+
+    #[test]
+    fn test_enum_default_deserialization() {
+        // Deserializing a JSON object with missing enum field that has a default
+        let json = r#"{"status": "UP", "components": []}"#;
+        let status: api::model::ServiceStatus = serde_json::from_str(json).unwrap();
+        assert_eq!(status.status.as_ref(), "UP");
+
+        // Default value should be DOWN
+        let default_status = api::model::ServiceStatusStatusVariant::default();
+        assert_eq!(default_status.to_string(), "DOWN");
+    }
 }

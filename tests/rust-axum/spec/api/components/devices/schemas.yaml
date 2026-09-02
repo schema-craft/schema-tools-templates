@@ -11,6 +11,7 @@ Device:
     deviceClassType:
       type: integer
       enum: [0, 5, 10, 15, 20, 30, 50, 100]
+      default: 0
     remoteId:
       type: string
       format: uuid
