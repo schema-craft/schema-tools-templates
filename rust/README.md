@@ -1,5 +1,13 @@
 # Options
 
+## Common (all templates)
+
+| Parameter              | Required | Default | Description                                                                                                                                                                          |
+|------------------------|----------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| skipValidate           |          | false   | Skip generating `garde::Validate` derive and all validation attributes                                                                                                               |
+| skipDenyUnknownFields  |          | false   | Skip generating `#[serde(deny_unknown_fields)]` on structs without additional properties                                                                                             |
+| skipRequiredNullable   |          | false   | Skip generating custom `deserialize_with = "required_nullable"` / `"optional_nullable"` on nullable fields. When enabled, nullable fields use standard serde deserialization instead |
+
 ## client (reqwest)
 
 | Parameter         | Required     | Default             | Description                                                                                                                                                                                          |

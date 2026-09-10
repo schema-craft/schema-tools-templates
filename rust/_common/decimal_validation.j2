@@ -1,0 +1,9 @@
+pub fn decimal_pattern(pattern: &Regex) -> impl FnOnce(&Decimal, &()) -> garde::Result + '_ {
+    move |value, _| {
+        if pattern.is_match(&value.to_string()) {
+            Ok(())
+        } else {
+            Err(garde::Error::new("value does not match pattern"))
+        }
+    }
+}

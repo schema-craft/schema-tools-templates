@@ -18,7 +18,7 @@ use std::fmt;
 pub struct {{ endpoint.operation | pascalcase }}Path{
 	{% for param in endpoint.parameters.path %}
     {{- <model_validation model={param.model} options={options} regex_path="super::model::"/> }}
-	#[serde(rename = "{{ param.name }}"{% if param.required %}, skip_serializing_if = "Option::is_none"{% endif %})]
+	#[serde(rename = "{{ param.name }}"{% if param.required and param.model.nullable and not options.skipRequiredNullable | default(value=false) %}, deserialize_with = "super::model::required_nullable"{% endif %}{% if param.required %}, skip_serializing_if = "Option::is_none"{% endif %})]
 	pub {{ <property_name name={param.name}/> }}: {{ <type property={param.model} ns="super::model"/> }},
 	{% endfor %}
 }
@@ -38,7 +38,7 @@ pub struct {{ endpoint.operation | pascalcase }}Query{
 	pub {{ <property_name name={param.name}/> }}: {% if not param.required %}Option<{% endif %}Vec<{{ <type property={param.model} ns="super::model"/> }}{% if not param.required %}>{% endif %}>,
 	{% else %}
     {{ <model_validation model={param.model} options={options} is_required={param.required} regex_path="super::model::"/> }}
-	#[serde(rename = "{{ param.name }}"{% if param.required %}, skip_serializing_if = "Option::is_none"{% endif %})]
+	#[serde(rename = "{{ param.name }}"{% if param.required and param.model.nullable and not options.skipRequiredNullable | default(value=false) %}, deserialize_with = "super::model::required_nullable"{% endif %}{% if param.required %}, skip_serializing_if = "Option::is_none"{% endif %})]
 	pub {{ <property_name name={param.name}/> }}: {% if not param.required %}Option<{% endif %}{{ <type property={param.model} ns="super::model"/> }}{% if not param.required %}>{% endif %},
 	{% endif %}
 	{% endfor %}
@@ -53,7 +53,7 @@ pub struct {{ endpoint.operation | pascalcase }}Query{
 pub struct {{ endpoint.operation | pascalcase }}RequestHeaders{
 	{% for param in filtered_headers %}
     {{- <model_validation model={param.model} options={options} is_required={param.required} regex_path="super::model::"/> }}
-	#[serde(rename = "{{ param.name }}"{% if param.required %}, skip_serializing_if = "Option::is_none"{% endif %})]
+	#[serde(rename = "{{ param.name }}"{% if param.required and param.model.nullable and not options.skipRequiredNullable | default(value=false) %}, deserialize_with = "super::model::required_nullable"{% endif %}{% if param.required %}, skip_serializing_if = "Option::is_none"{% endif %})]
 	pub {{ <property_name name={param.name}/> }}: {% if not param.required %}Option<{% endif %}{{ <type property={param.model} ns="super::model"/> }}{% if not param.required %}>{% endif %},
 	{% endfor %}
 }
@@ -75,7 +75,7 @@ impl actix_web::FromRequest for {{ endpoint.operation | pascalcase }}RequestHead
 #[derive(Deserialize)]
 pub struct {{ endpoint.operation | pascalcase }}Response{{ response.statusCode }}Headers{
     {% for param in filtered_response_headers %}
-	#[serde(rename = "{{ param.name }}"{% if param.required %}, skip_serializing_if = "Option::is_none"{% endif %})]
+	#[serde(rename = "{{ param.name }}"{% if param.required and param.model.nullable and not options.skipRequiredNullable | default(value=false) %}, deserialize_with = "super::model::required_nullable"{% endif %}{% if param.required %}, skip_serializing_if = "Option::is_none"{% endif %})]
 	pub {{ <property_name name={param.name}/> }}: {% if not param.required %}Option<{% endif %}{{ <type property={param.model} ns="super::model"/> }}{% if not param.required %}>{% endif %},
 	{% endfor %}
 }

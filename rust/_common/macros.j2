@@ -69,7 +69,11 @@
 {% endfilter %}{% endcomponent range_type_validation %}
 
 {% component get_validation(validation, regex_path="", form=false, type="integer") %}{% filter nospaces %}
-    {% if validation.format and validation.format in ["decimal", "uuid"] %}
+    {% if validation.format == "decimal" %}
+        {% if form %}inner({% endif %}
+        {% if validation.pattern %}custom({{ regex_path }}decimal_pattern(&{{ regex_path }}{{ validation.pattern.name | snakecase | upper }})){% endif %}
+        {% if form %}){% endif %}
+    {% elif validation.format == "uuid" %}
     {% else %}
         {% if validation.minLength %}length(min = {{ validation.minLength }}{% if validation.maxLength %}, max = {{ validation.maxLength }}{% endif %}), {% endif %}
         {% if validation.maxLength and not validation.minLength %}length(max = {{ validation.maxLength }}), {% endif %}
@@ -95,7 +99,11 @@
             {% if <get_validation validation={model.validation} form={style == "form"} type={model.type}/> | length %}
                 #[garde(
                     {% if not is_required -%}inner({%- endif -%}
+                    {%- if model.validation.format == "decimal" and is_required and not model.required -%}inner({%- endif -%}
+                    {%- if model.validation.format == "decimal" and model.nullable -%}inner({%- endif -%}
                     {{ <get_validation validation={model.validation} regex_path={regex_path} form={style == "form"} type={model.type}/> }}
+                    {%- if model.validation.format == "decimal" and model.nullable -%}){%- endif -%}
+                    {%- if model.validation.format == "decimal" and is_required and not model.required -%}){%- endif -%}
                     {%- if model.type == "array" and model.model.validation and model.model.type != "enum" %}
                         {% if not model.required -%}inner({%- endif -%}
                         {%- if model.nullable -%}inner({%- endif -%}

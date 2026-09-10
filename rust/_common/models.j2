@@ -24,15 +24,20 @@ pub static {{ regexp.name | snakecase | upper }}: LazyLock<Regex> = LazyLock::ne
 {% endfor -%}
 {% endif %}
 
+{% if formats is containing(pat="decimal") and not options.skipValidate | default(value=false) %}
+{% include "decimal_validation.j2" %}
+{% endif %}
+
 {% for model in models %}
 {%- if model.object %}
 #[derive(Deserialize, Serialize, Debug,{% if not options.skipValidate | default(value=false) %} Validate,{% endif %} Clone{% if [item for item in model.object.properties if item.required == true] | length == 0 %}, Default{% endif %})]
-{% set modelName = <model_name name={model.object.name}/> %}
+{%- set modelName = <model_name name={model.object.name}/> %}
+{% if not model.object.additional and not options.skipDenyUnknownFields | default(value=false) -%}#[serde(deny_unknown_fields)]{% endif -%}
 pub struct {{ modelName }} {
     {%- set filtered_properties = model.object.properties | filter_not(attribute="type", value="const") %}
     {% for property in filtered_properties -%}
     {{ <model_validation model={property} options={options}/> }}
-    #[serde(rename = "{{ property.name }}"{% if not property.required and property.nullable %}, default, deserialize_with = "optional_nullable"{% elif not property.required %}, skip_serializing_if = "Option::is_none"{% endif %})]
+    #[serde(rename = "{{ property.name }}"{% if property.required and property.nullable and not options.skipRequiredNullable | default(value=false) %}, deserialize_with = "required_nullable"{% elif not property.required and property.nullable and not options.skipRequiredNullable | default(value=false) %}, default, deserialize_with = "optional_nullable"{% elif not property.required %}, skip_serializing_if = "Option::is_none"{% endif %})]
     pub {{ <property_name name={property.name}/> }}: {% if not property.required %}Option<{% endif %}{{ <type property={property}/> }}{% if not property.required %}>{% endif %},
     {%- endfor %}
 
@@ -213,11 +218,20 @@ pub type {{ <model_name name={model.primitive.name}/> }} = {{ <type property={mo
 {% endif %}
 {%- endfor %}
 
+{% if not options.skipRequiredNullable | default(value=false) %}
+pub fn required_nullable<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
+    where T: Deserialize<'de>,
+          D: Deserializer<'de>
+{
+    Option::<T>::deserialize(deserializer)
+}
+
 pub fn optional_nullable<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
     where T: Deserialize<'de>,
           D: Deserializer<'de>
 {
     Deserialize::deserialize(deserializer).map(Some)
 }
+{% endif %}
 
 {% block end %}{% endblock end %}

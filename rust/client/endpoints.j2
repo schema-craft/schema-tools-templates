@@ -124,7 +124,7 @@ impl {{ endpoint.operation | pascalcase }}Response{
 #[derive(Serialize, Deserialize, {% if [item for item in endpoint.parameters.query if item.required == true] | length == 0 %}Default{% endif %})]
 pub struct {{ endpoint.operation | pascalcase }}Query{
 	{%- for q in endpoint.parameters.query %}
-    #[serde(rename = "{{ q.name }}"{% if not q.required and q.nullable %}, deserialize_with = "optional_nullable"{% elif not q.required %}, skip_serializing_if = "Option::is_none"{% endif %})]
+    #[serde(rename = "{{ q.name }}"{% if not q.required and q.nullable and not options.skipRequiredNullable | default(value=false) %}, deserialize_with = "optional_nullable"{% elif not q.required %}, skip_serializing_if = "Option::is_none"{% endif %})]
 	pub {{ <property_name name={q.name}/> }}: {% if not q.required %}Option<{% endif %}{% if q.model %}{{ <type property={q.model} ns="super::model"/> }}{% elif q.model.enum %}{{ <type property={q.model.enum} ns="super::model"/> }}{% endif %}{% if not q.required %}>{% endif %},
 	{% endfor -%}
 }
