@@ -26,6 +26,7 @@ pub struct Coordinates (pub f64, pub f64);
 
 mod api;
 mod client;
+mod client_urlencoded;
 mod handler {
 
 
@@ -427,6 +428,29 @@ mod tests {
             .await;
 
         assert_eq!(result.is_err(), false);
+        assert_eq!(
+            result.unwrap().data.get(0).unwrap().device_id,
+            "138f5d31-4feb-4765-88ad-989dff706b53"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_devices_list_v1_default_qs_sends_query() {
+        let uri = run_server(Arc::new(Database {}), Arc::new(MessageBus {}))
+            .await
+            .expect("Cannot run server");
+
+        // client generated without `-o qs`, i.e. the default serde_urlencoded
+        let client = super::client_urlencoded::devices::DevicesClient::new(uri, reqwest::Client::new())
+            .with_auth_basic_auth("testing");
+
+        let result = client
+            .devices_list_v1(super::client_urlencoded::devices::endpoint::DevicesListV1Query {
+                page: Some(2),
+                ..Default::default()
+            })
+            .await;
+
         assert_eq!(
             result.unwrap().data.get(0).unwrap().device_id,
             "138f5d31-4feb-4765-88ad-989dff706b53"

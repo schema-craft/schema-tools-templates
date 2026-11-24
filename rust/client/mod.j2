@@ -149,7 +149,7 @@ impl {{ options.name }} {
 
         let response = {% if "tracing" in apm %}async move { {% endif -%}
             {% if qs in ["serde_qs", "serde_qs_1"] %}let{%- if endpoint.parameters.query | length > 0 %} mut{% endif %} req = {% endif %}request
-                {%- if endpoint.parameters.query | length > 0 and qs == "urlencoded" %}
+                {%- if endpoint.parameters.query | length > 0 and qs in ["serde_urlencoded", "urlencoded"] %}
                 .query(&query)
                 {% endif %}
                 {%- if endpoint.requestbody?.models?["default"] %}.json(&body){% endif -%}

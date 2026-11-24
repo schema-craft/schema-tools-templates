@@ -5,3 +5,5 @@ src/client/error.rs
 src/rabbitmq
 spec/publish
 target/
+src/client_urlencoded/devices
+src/client_urlencoded/error.rs
