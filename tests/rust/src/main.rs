@@ -158,8 +158,8 @@ mod handler {
             });
         }
 
-        api::endpoint::AccessoryGetV1Response::Status200(api::endpoint::GetAccessory200ResponseWithHeaders{
-            body: api::model::GetAccessory200Response::new(
+        api::endpoint::AccessoryGetV1Response::Status200(api::endpoint::CreateAccessory200ResponseWithHeaders{
+            body: api::model::CreateAccessory200Response::new(
                 api::model::Accessory::new(path.accessory_id),
             ),
             headers: api::endpoint::AccessoryCreateV1Response200Headers{

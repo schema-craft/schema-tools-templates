@@ -152,9 +152,9 @@ mod handler {
 
         if path.device_id.eq("missing") {
             return api::endpoint::DeviceGetV1Response::Status400(
-                api::model::GetDevice400Response {
-                    error: api::model::GetDevice400ResponseError {
-                        code: api::model::GetDevice400ResponseErrorCodeVariant::NotFound,
+                api::model::GetAccessory400Response {
+                    error: api::model::GetAccessory400ResponseError {
+                        code: api::model::GetAccessory400ResponseErrorCodeVariant::NotFound,
                     },
                 },
             );
@@ -198,7 +198,7 @@ mod handler {
         request: api::model::Location,
     ) -> api::endpoint::LocationCreateV1Response {
         api::endpoint::LocationCreateV1Response::Status200(
-            api::model::GetLocation200Response::new(request),
+            api::model::CreateLocation200Response::new(request),
         )
     }
 
@@ -265,10 +265,10 @@ mod handler {
     ) -> api::endpoint::AccessoryGetV1Response {
         if path.accessory_id == "invalid" {
             return api::endpoint::AccessoryGetV1Response::Status400(
-                api::endpoint::GetDevice400ResponseWithHeaders {
-                    body: api::model::GetDevice400Response::new(
-                        api::model::GetDevice400ResponseError::new(
-                            api::model::GetDevice400ResponseErrorCodeVariant::ValidationError,
+                api::endpoint::GetAccessory400ResponseWithHeaders {
+                    body: api::model::GetAccessory400Response::new(
+                        api::model::GetAccessory400ResponseError::new(
+                            api::model::GetAccessory400ResponseErrorCodeVariant::ValidationError,
                         ),
                     ),
                     headers: api::endpoint::AccessoryGetV1Response400Headers {
@@ -279,8 +279,8 @@ mod handler {
         }
 
         api::endpoint::AccessoryGetV1Response::Status200(
-            api::endpoint::GetAccessory200ResponseWithHeaders {
-                body: api::model::GetAccessory200Response::new(api::model::Accessory::new(
+            api::endpoint::CreateAccessory200ResponseWithHeaders {
+                body: api::model::CreateAccessory200Response::new(api::model::Accessory::new(
                     path.accessory_id,
                 )),
                 headers: api::endpoint::AccessoryCreateV1Response200Headers {
@@ -563,9 +563,9 @@ mod tests {
         let error = result.unwrap_err();
         let _expected = ClientError::Error(
             super::client::devices::endpoint::DeviceGetV1Error::Error400(
-                client::devices::model::GetDevice400Response {
-                    error: client::devices::model::GetDevice400ResponseError::new(
-                        client::devices::model::GetDevice400ResponseErrorCodeVariant::NotFound,
+                client::devices::model::GetAccessory400Response {
+                    error: client::devices::model::GetAccessory400ResponseError::new(
+                        client::devices::model::GetAccessory400ResponseErrorCodeVariant::NotFound,
                     ),
                 },
             ),
