@@ -1,4 +1,5 @@
 {# type=static,filename=rabbitmq/consumer.rs,min_version=1.0.0 #}
+use super::connection::close_quietly;
 use super::{RabbitConnectionManager, message::MessageExtractor, shutdown::Shutdown};
 use futures_util::StreamExt;
 use lapin::{
@@ -32,6 +33,7 @@ enum LoopExit {
 
 struct WorkerChannel {
     conn: Arc<lapin::Connection>,
+    channel: lapin::Channel,
     stream: lapin::Consumer,
 }
 
@@ -183,9 +185,12 @@ where
             worker_handles.push(handle);
         }
 
+        let manager = self.manager;
+        // Resolves once every in-flight message is acked and the connection is closed cleanly.
         tokio::spawn(async move {
             shutdown.wait().await;
             futures_util::future::join_all(worker_handles).await;
+            manager.close().await;
         })
     }
 }
@@ -249,12 +254,13 @@ async fn setup_channel(
 
     tracing::info!(worker = id, queue = queue.as_ref(), "Connection established");
     *backoff = Duration::from_millis(500);
-    Some(WorkerChannel { conn, stream })
+    Some(WorkerChannel { conn, channel, stream })
 }
 
 async fn consume_loop<D: Clone + Send + Sync + 'static>(
     id: usize,
-    stream: &mut lapin::Consumer,
+    tag: &str,
+    wc: &mut WorkerChannel,
     handlers: &Arc<HandlerMap<D>>,
     deps: &Arc<D>,
     shutdown: &Shutdown,
@@ -267,13 +273,24 @@ async fn consume_loop<D: Clone + Send + Sync + 'static>(
 
         tokio::select! {
             biased;
-            _ = shutdown.wait() => break LoopExit::StreamClosed,
-            item = stream.next() => match item {
+            _ = shutdown.wait() => {
+                // Stop the broker pushing; unstarted deliveries are requeued by the channel close.
+                close_quietly(
+                    "consumer",
+                    wc.channel.basic_cancel(tag.into(), BasicCancelOptions::default()),
+                )
+                .await;
+                break LoopExit::StreamClosed;
+            }
+            item = wc.stream.next() => match item {
                 Some(Ok(delivery)) => {
-                    let permit = Arc::clone(semaphore)
-                        .acquire_owned()
-                        .await
-                        .expect("semaphore closed");
+                    let Ok(permit) = Arc::clone(semaphore).acquire_owned().await else {
+                        break LoopExit::StreamClosed;
+                    };
+                    // Shutdown may have fired while waiting for a permit: don't start new work.
+                    if shutdown.is_triggered() {
+                        continue;
+                    }
                     let handlers = Arc::clone(handlers);
                     let deps = Arc::clone(deps);
                     join_set.spawn(async move {
@@ -315,15 +332,21 @@ async fn run_worker<D: Clone + Send + Sync + 'static>(
             return;
         }
 
-        let Some(mut wc) =
-            setup_channel(id, &queue, &tag, consumer_prefetch, &manager, &mut backoff).await
-        else {
+        let setup = setup_channel(id, &queue, &tag, consumer_prefetch, &manager, &mut backoff);
+        let Some(mut wc) = (tokio::select! {
+            _ = shutdown.wait() => return,
+            wc = setup => wc,
+        }) else {
             continue;
         };
 
-        let exit = consume_loop(id, &mut wc.stream, &handlers, &deps, &shutdown, &semaphore).await;
+        let exit = consume_loop(id, &tag, &mut wc, &handlers, &deps, &shutdown, &semaphore).await;
 
         if shutdown.is_triggered() {
+            // In-flight acks are sent; close-ok guarantees the broker has received them.
+            if wc.channel.status().connected() {
+                close_quietly("channel", wc.channel.close(200, "shutdown".into())).await;
+            }
             return;
         }
 
@@ -333,7 +356,10 @@ async fn run_worker<D: Clone + Send + Sync + 'static>(
 
         match exit {
             LoopExit::StreamError => {
-                tokio::time::sleep(backoff).await;
+                tokio::select! {
+                    _ = shutdown.wait() => return,
+                    _ = tokio::time::sleep(backoff) => {}
+                }
                 backoff = (backoff * 2).min(Duration::from_secs(30));
             }
             LoopExit::StreamClosed => {

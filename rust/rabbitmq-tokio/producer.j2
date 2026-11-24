@@ -1,5 +1,6 @@
 {# type=static,filename=rabbitmq/producer.rs,min_version=1.0.0 #}
 use super::RabbitConnectionManager;
+use super::connection::close_quietly;
 use super::message::PublishMessage;
 
 use arc_swap::ArcSwap;
@@ -100,6 +101,7 @@ impl RabbitProducer {
                     }
                     return Ok(ch);
                 }
+                Err(e) if self.manager.is_closed() => return Err(e),
                 Err(e) => {
                     tracing::warn!(
                         attempt,
@@ -154,6 +156,15 @@ impl RabbitProducer {
 
     fn invalidate_channel(&self) {
         self.channel.store(empty_channel());
+    }
+
+    /// Closes the publishing channel (bounded by `CLOSE_TIMEOUT`, errors are logged).
+    /// A later publish opens a new channel unless the manager was closed too.
+    pub async fn close(&self) {
+        let slot = self.channel.swap(empty_channel());
+        if let Some(ch) = slot.as_ref().as_ref().filter(|ch| ch.status().connected()) {
+            close_quietly("producer channel", ch.close(200, "shutdown".into())).await;
+        }
     }
 
     pub async fn publish_raw(&self, routing_key: &str, payload: &[u8]) -> Result<(), lapin::Error> {
