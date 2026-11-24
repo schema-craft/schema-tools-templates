@@ -14,6 +14,7 @@ This repository contains Tera templates used by [schema-tools](https://github.co
   - `tests/rust` — actix-web + RabbitMQ
   - `tests/rust-axum` — axum server + client
   - `tests/rust-axum-relaxed` — axum server + client with relaxed validation
+  - `tests/rust-tokio-rmq` — `rabbitmq-tokio` producer/consumer integration tests (needs RabbitMQ: `docker run -d -p 5672:5672 rabbitmq:4`, or set `AMQP_URI`)
 
 ## Running the tests
 
@@ -31,11 +32,12 @@ cargo check
 cargo test
 ```
 
-The same workflow is repeated for the other two crates:
+The same workflow is repeated for the other crates:
 
 ```bash
 cd tests/rust-axum        && make codegen && cargo check && cargo test
 cd tests/rust             && make codegen && cargo check && cargo test
+cd tests/rust-tokio-rmq   && make codegen && cargo check && cargo test   # needs RabbitMQ
 ```
 
 CI runs exactly this sequence — see `.github/workflows/test.yaml` and `.github/workflows/build.yaml`.

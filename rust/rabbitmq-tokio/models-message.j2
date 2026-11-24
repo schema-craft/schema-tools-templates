@@ -30,7 +30,7 @@ pub trait MessageExtractor: Sized {
 
 fn generate_time_string() -> String {
     let now = std::time::SystemTime::now();
-    let now: DateTime<Utc> = now.into();
+    let now: chrono::DateTime<chrono::Utc> = now.into();
 
     now.to_rfc3339()
 }
