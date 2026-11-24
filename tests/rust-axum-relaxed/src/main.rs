@@ -158,7 +158,7 @@ mod handler {
 
         api::endpoint::DeviceGetV1Response::Status200(api::model::GetDevice200Response {
             data: api::model::Device::new(
-                "test".to_string(),
+                path.device_id.clone(),
                 api::model::DeviceDeviceClassTypeVariant::DeviceDeviceClassType10,
                 uuid!("67e55044-10b1-426f-9247-bb680e5fe0c8"),
                 None,
@@ -710,6 +710,26 @@ mod tests {
         );
 
         assert!(matches!(error, _expected));
+    }
+
+    #[tokio::test]
+    async fn test_devices_get_v1_path_param_is_encoded() {
+        let uri = run_server(Arc::new(Database {}), Arc::new(MessageBus {}))
+            .await
+            .expect("Cannot run server");
+
+        let client = super::client::devices::DevicesClient::new(uri, reqwest::Client::new());
+
+        // the server must get the exact value, not a different path
+        for id in ["x/../../livez", "a?b=1#c", "x\\..\\y", "%2e%2e", "zażółć 1"] {
+            let device = client.device_get_v1(id.to_string()).await.unwrap();
+            assert_eq!(device.data.device_id, id);
+        }
+        // dot segments are normalized even when encoded, so the client refuses them
+        for id in ["", ".", ".."] {
+            let result = client.device_get_v1(id.to_string()).await;
+            assert!(matches!(result, Err(ClientError::InvalidPathParameter(_))), "{id:?}");
+        }
     }
 
     #[tokio::test]

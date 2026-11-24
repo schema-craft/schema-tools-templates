@@ -30,6 +30,18 @@ pub mod model;
 #[allow(dead_code, unused_imports)]
 pub mod endpoint;
 
+/// Percent-encodes one path segment, so a parameter value can't change the request path.
+#[allow(dead_code)]
+fn path_segment(value: &str) -> Result<String, String> {
+    // Dot segments are normalized even when percent-encoded, so they can't be sent safely.
+    if matches!(value, "" | "." | "..") {
+        return Err(format!("invalid path parameter: {value:?}"));
+    }
+    let mut url = reqwest::Url::parse("http://x/").expect("static url");
+    url.path_segments_mut().expect("http url has a path").push(value);
+    Ok(url.path()[1..].to_string())
+}
+
 #[derive(Clone)]
 pub struct {{ options.name }} {
     pub client: reqwest::Client,
@@ -88,7 +100,7 @@ impl {{ options.name }} {
 
         let request = self.client.request(Method::{{ endpoint.method | upper }}, &format!("{}{{ endpoint.path | path_parts(to="{}") }}", self.uri
                 {%- for q in endpoint.parameters.path %}
-            , {{<property_name name={q.name}/>}}.to_string()
+            , path_segment(&{{<property_name name={q.name}/>}}.to_string()).map_err(ClientError::<{{ <endpoint_error_body endpoint={endpoint} options={options}/> }}>::InvalidPathParameter)?
             {% endfor -%}
         ));
 
