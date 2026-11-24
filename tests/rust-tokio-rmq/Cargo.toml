@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 # messages (rust/rabbitmq-tokio)
-lapin = "4.4.0"
+lapin = "4.13.0"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
 futures-util = "0.3"

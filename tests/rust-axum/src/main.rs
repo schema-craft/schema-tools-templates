@@ -903,7 +903,9 @@ mod tests {
             simple_mixed: Some(model::LocationSimpleMixedVariant::String(
                 "test".to_string(),
             )),
-            kind_discriminator: Some(model::LocationKindDiscriminatorVariant::Semi),
+            kind_discriminator: Some(model::LocationKindDiscriminatorVariant::Simple(
+                model::KindDiscriminatorComplexVariant::new("disc".to_string()),
+            )),
             kind_externally_tagged: Some(model::LocationKindExternallyTaggedVariant::Complex(
                 model::KindUntaggedComplex {
                     name_b: "xxx".to_string(),
@@ -943,7 +945,8 @@ mod tests {
 
         let expected: serde_json::Value = serde_json::json!({
           "kindDiscriminator": {
-            "testField": "semi"
+            "testField": "simple",
+            "name": "disc"
           },
           "kindExternallyTagged": {
             "complex": {
