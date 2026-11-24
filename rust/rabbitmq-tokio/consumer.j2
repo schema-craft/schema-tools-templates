@@ -1,7 +1,7 @@
 {# type=static,filename=rabbitmq/consumer.rs,min_version=1.0.0 #}
 use super::connection::close_quietly;
 use super::{RabbitConnectionManager, message::MessageExtractor, shutdown::Shutdown};
-use futures_util::StreamExt;
+use futures_util::{FutureExt, StreamExt};
 use lapin::{
     message::Delivery,
     options::*,
@@ -9,6 +9,7 @@ use lapin::{
 };
 use rustc_hash::FxHashMap;
 use std::future::{self, Future};
+use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -310,7 +311,8 @@ async fn consume_loop<D: Clone + Send + Sync + 'static>(
         }
     };
 
-    join_set.join_all().await;
+    // Not join_all: it re-raises a task panic and would abort the other in-flight handlers.
+    while join_set.join_next().await.is_some() {}
     exit
 }
 
@@ -407,17 +409,28 @@ async fn process_delivery<D: Clone + Send + Sync + 'static>(
     let confirmation = async {
         match msg_type.and_then(|t| handlers.get(t)) {
             Some(handler) => {
-                handler
-                    .call(
-                        (*deps).clone(),
-                        IncomingMessage {
-                            data: &delivery.data,
-                            headers: &headers,
-                            delivery_tag: delivery.delivery_tag,
-                            routing_key: delivery.routing_key.as_str(),
-                        },
-                    )
-                    .await
+                let handled = handler.call(
+                    (*deps).clone(),
+                    IncomingMessage {
+                        data: &delivery.data,
+                        headers: &headers,
+                        delivery_tag: delivery.delivery_tag,
+                        routing_key: delivery.routing_key.as_str(),
+                    },
+                );
+                // A panic would leave the delivery unacked and eat a prefetch slot until the channel closes.
+                match AssertUnwindSafe(handled).catch_unwind().await {
+                    Ok(confirmation) => confirmation,
+                    Err(panic) => {
+                        let reason = panic
+                            .downcast_ref::<&str>()
+                            .copied()
+                            .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+                            .unwrap_or("<non-string panic>");
+                        tracing::error!("Handler panicked (nacked): {reason}");
+                        Confirmation::Nack
+                    }
+                }
             }
             None => {
                 tracing::error!(

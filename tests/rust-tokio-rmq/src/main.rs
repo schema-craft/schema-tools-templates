@@ -133,6 +133,72 @@ mod tests {
         m.close().await;
     }
 
+    /// A panicking handler nacks its message (no requeue loop) and must neither stall the
+    /// worker nor abort other in-flight handlers on shutdown.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handler_panic_is_nacked() {
+        const QUEUE: &str = "tokio_rmq_panic";
+        let m = manager("test-panic-setup");
+        let p = RabbitProducer::new(m.clone(), "").await.unwrap();
+
+        let run = |prefetch: u16, log: Arc<Mutex<Vec<String>>>| {
+            RabbitConsumer::new(QUEUE, prefetch, (), Some(1), manager("test-panic"))
+                .subscribe(move |msg: DeviceCreatedV1, _: ()| {
+                    let log = log.clone();
+                    async move {
+                        let id = msg.payload.device_id;
+                        log.lock().unwrap().push(format!("{id}:start"));
+                        if id == "boom" {
+                            panic!("handler boom");
+                        }
+                        let ms = if id == "slow" { 1000 } else { 0 };
+                        tokio::time::sleep(Duration::from_millis(ms)).await;
+                        log.lock().unwrap().push(format!("{id}:end"));
+                    }
+                })
+        };
+        let wait_for = |log: Arc<Mutex<Vec<String>>>, entry: &'static str| async move {
+            tokio::time::timeout(Duration::from_secs(10), async {
+                while !log.lock().unwrap().iter().any(|e| e == entry) {
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            })
+            .await
+            .unwrap_or_else(|_| panic!("{entry} never logged: {:?}", log.lock().unwrap()));
+        };
+
+        // prefetch 1: the panicked message must not block the next one
+        fresh_queue(&m, QUEUE, FieldTable::default()).await;
+        for id in ["boom", "2"] {
+            p.publish(QUEUE, device(id)).await.unwrap();
+        }
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let shutdown = Shutdown::new();
+        let handle = run(1, log.clone()).start(shutdown.child());
+        wait_for(log.clone(), "2:end").await;
+        shutdown.trigger();
+        handle.await.unwrap();
+        assert_eq!(ready_count(&m, QUEUE).await, 0, "panicked message must not be requeued");
+
+        // shutdown after a panic still finishes the other in-flight handler
+        fresh_queue(&m, QUEUE, FieldTable::default()).await;
+        for id in ["boom", "slow"] {
+            p.publish(QUEUE, device(id)).await.unwrap();
+        }
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let shutdown = Shutdown::new();
+        let handle = run(2, log.clone()).start(shutdown.child());
+        wait_for(log.clone(), "slow:start").await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        shutdown.trigger();
+        tokio::time::timeout(Duration::from_secs(10), handle).await.unwrap().unwrap();
+        assert!(log.lock().unwrap().iter().any(|e| e == "slow:end"), "{:?}", log.lock().unwrap());
+        assert_eq!(ready_count(&m, QUEUE).await, 0);
+
+        p.close().await;
+        m.close().await;
+    }
+
     static LAPIN_PARKED: AtomicUsize = AtomicUsize::new(0);
 
     /// Counts lapin's trace event for a confirm parked on the channel because its publish
