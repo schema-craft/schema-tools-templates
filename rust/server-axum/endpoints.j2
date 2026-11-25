@@ -210,13 +210,13 @@ impl From<{{ endpoint.operation | pascalcase }}Response> for Response<Body> {
 
                         {% if [item for item in filtered_response_headers if item.required == true] | length > 0 %}
                         {% for param in [item for item in filtered_response_headers if item.required == true] %}
-                        headers.insert("{{ param.name | lower }}", HeaderValue::from_str(&model.headers.{{ <property_name name={param.name}/> }}).unwrap());
+                        {% set headerVar = "model.headers." ~ <property_name name={param.name}/> %}if let Ok(value) = {{ <axum_into_header_value parameter={param} variable={headerVar}/> }} { headers.insert("{{ param.name | lower }}", value); }
                         {% endfor %};
                         {% endif %}
 
                         {% for param in [item for item in filtered_response_headers if item.required == false]  %}
                         if let Some(header) = model.headers.{{ <property_name name={param.name}/> }} {
-                            headers.insert("{{ param.name | lower }}", {{ <axum_into_header_value parameter={param} variable="header"/> }});
+                            if let Ok(value) = {{ <axum_into_header_value parameter={param} variable="header"/> }} { headers.insert("{{ param.name | lower }}", value); }
                         }
                         {% endfor %}
 
@@ -232,13 +232,13 @@ impl From<{{ endpoint.operation | pascalcase }}Response> for Response<Body> {
 
                     {% if [item for item in filtered_response_headers if item.required == true] | length > 0 %}
                     {% for param in [item for item in filtered_response_headers if item.required == true] %}
-                    headers.insert("{{ param.name | lower }}", HeaderValue::from_str(&h.{{ <property_name name={param.name}/> }}).unwrap());
+                    {% set headerVar = "h." ~ <property_name name={param.name}/> %}if let Ok(value) = {{ <axum_into_header_value parameter={param} variable={headerVar}/> }} { headers.insert("{{ param.name | lower }}", value); }
                     {% endfor %};
                     {% endif %}
 
                     {% for param in [item for item in filtered_response_headers if item.required == false]  %}
                     if let Some(header) = h.{{ <property_name name={param.name}/> }} {
-                        headers.insert("{{ param.name | lower }}", {{ <axum_into_header_value parameter={param} variable="header"/> }});
+                        if let Ok(value) = {{ <axum_into_header_value parameter={param} variable="header"/> }} { headers.insert("{{ param.name | lower }}", value); }
                     }
                     {% endfor %}
 

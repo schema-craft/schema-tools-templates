@@ -93,13 +93,11 @@ model.into_response()
 
 {% component axum_into_header_value(parameter, variable) -%}
 {%- if parameter.model.type == "string" and parameter.model.validation and parameter.model.validation.format == "uuid" -%}
-HeaderValue::from_str(&{{ variable }}.to_string()).unwrap()
-{%- elif parameter.model.type == "string" -%}
-HeaderValue::from_str(&{{ variable }}).unwrap()
+HeaderValue::from_str(&{{ variable }}.to_string())
 {%- elif parameter.model.type == "integer" -%}
-HeaderValue::from({{ variable }})
+Ok::<_, std::convert::Infallible>(HeaderValue::from({{ variable }}))
 {%- else -%}
-HeaderValue::from_str(&{{ variable }}).unwrap()
+HeaderValue::from_str(&{{ variable }})
 {%- endif -%}
 {%- endcomponent axum_into_header_value %}
 

@@ -1030,4 +1030,13 @@ mod tests {
         let default_status = api::model::ServiceStatusStatusVariant::default();
         assert_eq!(default_status.to_string(), "DOWN");
     }
+
+    #[test]
+    fn client_header_with_invalid_value_is_skipped_not_panicking() {
+        use crate::client::devices::endpoint::AccessoryGetV1Headers;
+        let bad = AccessoryGetV1Headers { secret: "a\nb".into() };
+        assert!(bad.into_vec().is_empty());
+        let ok = AccessoryGetV1Headers { secret: "abc".into() };
+        assert_eq!(ok.into_vec()[0].1, "abc");
+    }
 }
