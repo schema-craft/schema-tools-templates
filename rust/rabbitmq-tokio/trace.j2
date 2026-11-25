@@ -93,3 +93,8 @@ pub fn extract_trace_context(
 ) -> {{ apm_prefix }}opentelemetry::Context {
     get_trace_propagator().extract(&TraceHeaders { headers })
 }
+
+/// Makes `span` a child of the trace carried in the message headers (no-op without one).
+pub fn set_parent_from_headers(span: &Span, headers: &FieldTable) {
+    let _ = span.set_parent(extract_trace_context(headers));
+}

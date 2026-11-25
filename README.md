@@ -14,6 +14,7 @@ This repository contains Tera templates used by [schema-tools](https://github.co
   - `tests/rust` — actix-web + RabbitMQ
   - `tests/rust-axum` — axum server + client
   - `tests/rust-axum-relaxed` — axum server + client with relaxed validation
+  - `tests/rust-tokio-rmq` — `rabbitmq-tokio` producer/consumer integration tests (needs RabbitMQ: `docker run -d -p 5672:5672 rabbitmq:4`, or set `AMQP_URI`)
 
 ## Running the tests
 
@@ -31,11 +32,12 @@ cargo check
 cargo test
 ```
 
-The same workflow is repeated for the other two crates:
+The same workflow is repeated for the other crates:
 
 ```bash
 cd tests/rust-axum        && make codegen && cargo check && cargo test
 cd tests/rust             && make codegen && cargo check && cargo test
+cd tests/rust-tokio-rmq   && make codegen && cargo check && cargo test   # needs RabbitMQ
 ```
 
 CI runs exactly this sequence — see `.github/workflows/test.yaml` and `.github/workflows/build.yaml`.
@@ -52,4 +54,4 @@ CI runs exactly this sequence — see `.github/workflows/test.yaml` and `.github
 - The generated library code compiles.
 - `cargo test` passes for all three test crates.
 
-The hand-written `src/main.rs` examples were updated to use the newly generated type names. The `test_locations_create_v1` test was also adjusted to use the `LocationKindDiscriminatorVariant::Semi` variant, because the `Simple` variant currently produces a duplicate `testField` key during JSON serialization/deserialization (a pre-existing template issue unrelated to the v2 syntax migration).
+The hand-written `src/main.rs` examples were updated to use the newly generated type names. The `test_locations_create_v1` test round-trips the `Simple` variant of the discriminated `oneOf` (fixed in schematools v1.1.0, which no longer duplicates the `testField` key).

@@ -36,6 +36,8 @@ pub enum ClientError<T> where T: ApiError {
     Error(T),
     Request(reqwest::Error),
     Response(Box<ResponseProcessingError>),
+    /// A path parameter that cannot be sent safely ("", "." or "..").
+    InvalidPathParameter(String),
 }
 
 impl<T> ClientError<T> where T: ApiError {

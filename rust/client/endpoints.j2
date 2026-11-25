@@ -86,15 +86,16 @@ pub struct {{ endpoint.operation | pascalcase }}Headers{
 }
 
 impl {{ endpoint.operation | pascalcase }}Headers {
+	/// Values that are not valid header values (e.g. `\n`, non-ASCII) are skipped, like custom headers.
 	pub fn into_vec(self) -> Vec<(HeaderName, HeaderValue)> {
 		vec![
 			{%- for q in filtered_headers %}
 			{% if q.required %}
             {% set propertyName = <property_name name={q.name}/> %}
             {% set fullPropertyName = "self." ~ propertyName %}
-            Some((HeaderName::from_static("{{ q.name | lower }}"), HeaderValue::from_str({{ <to_str q={q.model} name={fullPropertyName}/> }}).unwrap())),
+            HeaderValue::from_str({{ <to_str q={q.model} name={fullPropertyName}/> }}).ok().map(|v| (HeaderName::from_static("{{ q.name | lower }}"), v)),
 			{% else %}
-			self.{{ <property_name name={q.name}/> }}.map(|v| (HeaderName::from_static("{{ q.name | lower }}"), HeaderValue::from_str({{ <to_str q={q.model} name='v'/> }}).unwrap())),
+			self.{{ <property_name name={q.name}/> }}.and_then(|v| HeaderValue::from_str({{ <to_str q={q.model} name='v'/> }}).ok()).map(|v| (HeaderName::from_static("{{ q.name | lower }}"), v)),
 			{% endif %}
 			{% endfor -%}
 		]

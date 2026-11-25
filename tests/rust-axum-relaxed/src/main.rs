@@ -26,6 +26,7 @@ pub struct Coordinates (pub f64, pub f64);
 
 mod api;
 mod client;
+mod client_urlencoded;
 mod handler {
 
 
@@ -147,9 +148,9 @@ mod handler {
 
         if path.device_id.eq("missing") {
             return api::endpoint::DeviceGetV1Response::Status400(
-                api::model::GetDevice400Response {
-                    error: api::model::GetDevice400ResponseError {
-                        code: api::model::GetDevice400ResponseErrorCodeVariant::NotFound,
+                api::model::GetAccessory400Response {
+                    error: api::model::GetAccessory400ResponseError {
+                        code: api::model::GetAccessory400ResponseErrorCodeVariant::NotFound,
                     },
                 },
             );
@@ -157,7 +158,7 @@ mod handler {
 
         api::endpoint::DeviceGetV1Response::Status200(api::model::GetDevice200Response {
             data: api::model::Device::new(
-                "test".to_string(),
+                path.device_id.clone(),
                 api::model::DeviceDeviceClassTypeVariant::DeviceDeviceClassType10,
                 uuid!("67e55044-10b1-426f-9247-bb680e5fe0c8"),
                 None,
@@ -184,7 +185,7 @@ mod handler {
         Json(request): Json<api::model::Location>
     ) -> api::endpoint::LocationCreateV1Response {
         api::endpoint::LocationCreateV1Response::Status200(
-            api::model::GetLocation200Response::new(request)
+            api::model::CreateLocation200Response::new(request)
         )
     }
 
@@ -251,10 +252,10 @@ mod handler {
     ) -> api::endpoint::AccessoryGetV1Response {
         if path.accessory_id == "invalid" {
             return api::endpoint::AccessoryGetV1Response::Status400(
-                api::endpoint::GetDevice400ResponseWithHeaders {
-                    body: api::model::GetDevice400Response::new(
-                        api::model::GetDevice400ResponseError::new(
-                            api::model::GetDevice400ResponseErrorCodeVariant::ValidationError,
+                api::endpoint::GetAccessory400ResponseWithHeaders {
+                    body: api::model::GetAccessory400Response::new(
+                        api::model::GetAccessory400ResponseError::new(
+                            api::model::GetAccessory400ResponseErrorCodeVariant::ValidationError,
                         ),
                     ),
                     headers: api::endpoint::AccessoryGetV1Response400Headers {
@@ -265,8 +266,8 @@ mod handler {
         }
 
         api::endpoint::AccessoryGetV1Response::Status200(
-            api::endpoint::GetAccessory200ResponseWithHeaders {
-                body: api::model::GetAccessory200Response::new(api::model::Accessory::new(
+            api::endpoint::CreateAccessory200ResponseWithHeaders {
+                body: api::model::CreateAccessory200Response::new(api::model::Accessory::new(
                     path.accessory_id,
                 )),
                 headers: api::endpoint::AccessoryCreateV1Response200Headers {
@@ -434,6 +435,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_devices_list_v1_default_qs_sends_query() {
+        let uri = run_server(Arc::new(Database {}), Arc::new(MessageBus {}))
+            .await
+            .expect("Cannot run server");
+
+        // client generated without `-o qs`, i.e. the default serde_urlencoded
+        let client = super::client_urlencoded::devices::DevicesClient::new(uri, reqwest::Client::new())
+            .with_auth_basic_auth("testing");
+
+        let result = client
+            .devices_list_v1(super::client_urlencoded::devices::endpoint::DevicesListV1Query {
+                page: Some(2),
+                ..Default::default()
+            })
+            .await;
+
+        assert_eq!(
+            result.unwrap().data.get(0).unwrap().device_id,
+            "138f5d31-4feb-4765-88ad-989dff706b53"
+        );
+    }
+
+    #[tokio::test]
     async fn test_devices_list_v1_qs_reserved_word() {
         let uri = run_server(Arc::new(Database {}), Arc::new(MessageBus {}))
             .await
@@ -525,9 +549,9 @@ mod tests {
         let error = result.unwrap_err();
         let _expected = ClientError::Error(
             super::client::devices::endpoint::DeviceGetV1Error::Error400(
-                client::devices::model::GetDevice400Response {
-                    error: client::devices::model::GetDevice400ResponseError::new(
-                        client::devices::model::GetDevice400ResponseErrorCodeVariant::NotFound,
+                client::devices::model::GetAccessory400Response {
+                    error: client::devices::model::GetAccessory400ResponseError::new(
+                        client::devices::model::GetAccessory400ResponseErrorCodeVariant::NotFound,
                     ),
                 },
             ),
@@ -689,6 +713,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_devices_get_v1_path_param_is_encoded() {
+        let uri = run_server(Arc::new(Database {}), Arc::new(MessageBus {}))
+            .await
+            .expect("Cannot run server");
+
+        let client = super::client::devices::DevicesClient::new(uri, reqwest::Client::new());
+
+        // the server must get the exact value, not a different path
+        for id in ["x/../../livez", "a?b=1#c", "x\\..\\y", "%2e%2e", "zażółć 1"] {
+            let device = client.device_get_v1(id.to_string()).await.unwrap();
+            assert_eq!(device.data.device_id, id);
+        }
+        // dot segments are normalized even when encoded, so the client refuses them
+        for id in ["", ".", ".."] {
+            let result = client.device_get_v1(id.to_string()).await;
+            assert!(matches!(result, Err(ClientError::InvalidPathParameter(_))), "{id:?}");
+        }
+    }
+
+    #[tokio::test]
     async fn test_devices_get_v1_integer_enums_passed_as_json_numbers() {
         let uri = run_server(Arc::new(Database {}), Arc::new(MessageBus {}))
             .await
@@ -838,7 +882,9 @@ mod tests {
         let location = model::Location {
             location_id: "test".to_string(),
             simple_mixed: Some(model::LocationSimpleMixedVariant::String("test".to_string())),
-            kind_discriminator: Some(model::LocationKindDiscriminatorVariant::Semi),
+            kind_discriminator: Some(model::LocationKindDiscriminatorVariant::Simple(
+                model::KindDiscriminatorComplexVariant::new("disc".to_string()),
+            )),
             kind_externally_tagged: Some(model::LocationKindExternallyTaggedVariant::Complex(
                 model::KindUntaggedComplex {
                     name_b: "xxx".to_string(),
@@ -862,7 +908,8 @@ mod tests {
 
         let expected: serde_json::Value = serde_json::json!({
             "kindDiscriminator": {
-              "testField": "semi"
+              "testField": "simple",
+            "name": "disc"
             },
             "kindExternallyTagged": {
               "complex": {

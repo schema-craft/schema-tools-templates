@@ -1,4 +1,5 @@
 {# type=static,filename=rabbitmq/producer.rs,min_version=1.0.0 #}
+{% set apm = options.apm | default(value = "") %}
 use super::RabbitConnectionManager;
 use super::connection::close_quietly;
 use super::message::PublishMessage;
@@ -20,6 +21,12 @@ pub trait Publisher {
     async fn publish_raw(&self, routing_key: &str, payload: &[u8]) -> Result<(), lapin::Error>;
 }
 
+/// Publishes all messages and waits for every broker confirm.
+///
+/// Not atomic: on `Err` some messages may already be in the queue. A broker rejection (nack,
+/// e.g. queue full with `x-overflow: reject-publish`) returns `Err` saying
+/// "rejected N of M", but not which ones, so retrying the whole batch duplicates the accepted
+/// ones. Use `publish` per message when each message must be accounted for.
 pub trait BatchPublisher {
     async fn batch_publish<T>(
         &self,
@@ -168,98 +175,32 @@ impl RabbitProducer {
     }
 
     pub async fn publish_raw(&self, routing_key: &str, payload: &[u8]) -> Result<(), lapin::Error> {
-        let ch = self.get_channel().await?;
-
-        let confirm = ch
-            .basic_publish(
-                self.exchange.as_ref().into(),
-                routing_key.into(),
-                PUBLISH_OPTIONS,
-                payload,
-                BasicProperties::default(),
-            )
-            .await?
-            .await;
-
-        match confirm {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                self.invalidate_channel();
-                self.manager.invalidate();
-                Err(e.into())
-            }
-        }
+        self.publish_all(routing_key, vec![(payload.to_vec(), BasicProperties::default())])
+            .await
     }
 
+    /// Returns `Err` when the broker rejects the message (nack), not only on connection errors.
     pub async fn publish<T>(&self, routing_key: &str, message: T) -> Result<(), lapin::Error>
     where
         T: PublishMessage,
     {
-        let (headers, payload) = message.into_parts();
-        let payload_bytes = serde_json::to_vec(&payload).map_err(|e| {
-            lapin::Error::from(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-        })?;
-        let props = BasicProperties::default().with_headers(headers);
-        let ch = self.get_channel().await?;
-
-        let confirm = ch
-            .basic_publish(
-                self.exchange.as_ref().into(),
-                routing_key.into(),
-                PUBLISH_OPTIONS,
-                &payload_bytes,
-                props,
-            )
-            .await?
-            .await;
-
-        match confirm {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                self.invalidate_channel();
-                self.manager.invalidate();
-                Err(e.into())
-            }
-        }
+        self.publish_all(routing_key, vec![encode(message)?]).await
     }
 
+    /// See [`BatchPublisher`]: not atomic, a partial nack fails the whole call.
     pub async fn batch_publish_raw(
         &self,
         routing_key: &str,
         messages: Vec<&[u8]>,
     ) -> Result<(), lapin::Error> {
-        if messages.is_empty() {
-            return Ok(());
-        }
-
-        let ch = self.get_channel().await?;
-
-        for payload in messages {
-            if let Err(e) = ch
-                .basic_publish(
-                    self.exchange.as_ref().into(),
-                    routing_key.into(),
-                    PUBLISH_OPTIONS,
-                    payload,
-                    BasicProperties::default(),
-                )
-                .await
-            {
-                self.invalidate_channel();
-                self.manager.invalidate();
-                return Err(e);
-            }
-        }
-
-        if let Err(e) = ch.wait_for_confirms().await {
-            self.invalidate_channel();
-            self.manager.invalidate();
-            return Err(e);
-        }
-
-        Ok(())
+        let messages = messages
+            .into_iter()
+            .map(|p| (p.to_vec(), BasicProperties::default()))
+            .collect();
+        self.publish_all(routing_key, messages).await
     }
 
+    /// See [`BatchPublisher`]: not atomic, a partial nack fails the whole call.
     pub async fn batch_publish<T>(
         &self,
         routing_key: &str,
@@ -268,50 +209,81 @@ impl RabbitProducer {
     where
         T: PublishMessage,
     {
+        let prepared = messages.into_iter().map(encode).collect::<Result<_, _>>()?;
+        self.publish_all(routing_key, prepared).await
+    }
+
+    /// Publishes every message on one channel, then waits for all broker confirms.
+    /// A nack (broker refused the message, e.g. queue full with `x-overflow: reject-publish`)
+    /// is an error, not a success.
+    async fn publish_all(
+        &self,
+        routing_key: &str,
+        messages: Vec<(Vec<u8>, BasicProperties)>,
+    ) -> Result<(), lapin::Error> {
         if messages.is_empty() {
             return Ok(());
         }
-
-        let prepared: Vec<(Vec<u8>, BasicProperties)> = messages
+{% if "opentelemetry" in apm %}
+        // Read here, in the caller's span: the spawned task below runs outside it.
+        let span = tracing::Span::current();
+        let messages: Vec<_> = messages
             .into_iter()
-            .map(|msg| -> Result<_, lapin::Error> {
-                let (headers, payload) = msg.into_parts();
-                Ok((
-                    serde_json::to_vec(&payload).map_err(|e| {
-                        lapin::Error::from(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                    })?,
-                    BasicProperties::default().with_headers(headers),
-                ))
+            .map(|(payload, props)| {
+                let mut headers = props.headers().clone().unwrap_or_default();
+                super::trace::add_trace_headers(&mut headers, &span);
+                (payload, props.with_headers(headers))
             })
-            .collect::<Result<_, _>>()?;
+            .collect();
+{% endif %}
 
         let ch = self.get_channel().await?;
+        let exchange: ShortString = self.exchange.as_ref().into();
+        let routing_key: ShortString = routing_key.into();
+        let total = messages.len();
 
-        for (payload, props) in prepared {
-            if let Err(e) = ch
-                .basic_publish(
-                    self.exchange.as_ref().into(),
-                    routing_key.into(),
-                    PUBLISH_OPTIONS,
-                    &payload,
-                    props,
-                )
-                .await
-            {
+        // Spawned so a cancelled caller (client disconnect, timeout) can't stop a publish
+        // halfway: lapin then parks its confirm on the channel, which piles up for its whole life.
+        let task = tokio::spawn(async move {
+            let mut confirms = Vec::with_capacity(total);
+            for (payload, props) in messages {
+                let rk = routing_key.clone();
+                confirms.push(
+                    ch.basic_publish(exchange.clone(), rk, PUBLISH_OPTIONS, &payload, props)
+                        .await?,
+                );
+            }
+            let mut nacked = 0usize;
+            for confirm in confirms {
+                if confirm.await?.is_nack() {
+                    nacked += 1;
+                }
+            }
+            Ok::<_, lapin::Error>(nacked)
+        });
+
+        match task.await {
+            Ok(Ok(0)) => Ok(()),
+            Ok(Ok(nacked)) => Err(lapin::Error::from(std::io::Error::other(format!(
+                "RabbitMQ rejected {nacked} of {total} published message(s) (basic.nack)"
+            )))),
+            Ok(Err(e)) => {
                 self.invalidate_channel();
                 self.manager.invalidate();
-                return Err(e);
+                Err(e)
             }
+            Err(e) => Err(lapin::Error::from(std::io::Error::other(format!(
+                "RabbitMQ publish task failed: {e}"
+            )))),
         }
-
-        if let Err(e) = ch.wait_for_confirms().await {
-            self.invalidate_channel();
-            self.manager.invalidate();
-            return Err(e);
-        }
-
-        Ok(())
     }
+}
+
+fn encode<T: PublishMessage>(message: T) -> Result<(Vec<u8>, BasicProperties), lapin::Error> {
+    let (headers, payload) = message.into_parts();
+    let bytes = serde_json::to_vec(&payload)
+        .map_err(|e| lapin::Error::from(std::io::Error::new(std::io::ErrorKind::InvalidData, e)))?;
+    Ok((bytes, BasicProperties::default().with_headers(headers)))
 }
 
 impl Publisher for RabbitProducer {
