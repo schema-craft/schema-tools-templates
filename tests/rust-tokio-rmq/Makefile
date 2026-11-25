@@ -11,7 +11,7 @@ codegen: install-dependencies format
 	$(SCHEMATOOLS_BIN) chain -vv \
 		-c 'registry add templates ../../' \
 		-c 'process dereference spec/message/all.yaml --skip-root-internal-references --create-internal-references' \
-		-c 'codegen json-schema - --template templates::rust/_common/ --template templates::rust/rabbitmq-tokio/ ${FORMAT} --target-dir src/'
+		-c 'codegen json-schema - --template templates::rust/_common/ --template templates::rust/rabbitmq-tokio/ -o apm=tracing-opentelemetry ${FORMAT} --target-dir src/'
 
 install-dependencies: platform
 	@echo installing dependencies ...

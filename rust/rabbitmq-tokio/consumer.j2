@@ -1,4 +1,5 @@
 {# type=static,filename=rabbitmq/consumer.rs,min_version=1.0.0 #}
+{% set apm = options.apm | default(value = "") %}
 use super::connection::close_quietly;
 use super::{RabbitConnectionManager, message::MessageExtractor, shutdown::Shutdown};
 use futures_util::{FutureExt, StreamExt};
@@ -405,6 +406,9 @@ async fn process_delivery<D: Clone + Send + Sync + 'static>(
     } else {
         tracing::Span::none()
     };
+{% if "opentelemetry" in apm %}
+    super::trace::set_parent_from_headers(&span, &headers);
+{% endif %}
 
     let confirmation = async {
         match msg_type.and_then(|t| handlers.get(t)) {

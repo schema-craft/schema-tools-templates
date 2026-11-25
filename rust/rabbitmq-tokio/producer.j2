@@ -1,4 +1,5 @@
 {# type=static,filename=rabbitmq/producer.rs,min_version=1.0.0 #}
+{% set apm = options.apm | default(value = "") %}
 use super::RabbitConnectionManager;
 use super::connection::close_quietly;
 use super::message::PublishMessage;
@@ -223,6 +224,18 @@ impl RabbitProducer {
         if messages.is_empty() {
             return Ok(());
         }
+{% if "opentelemetry" in apm %}
+        // Read here, in the caller's span: the spawned task below runs outside it.
+        let span = tracing::Span::current();
+        let messages: Vec<_> = messages
+            .into_iter()
+            .map(|(payload, props)| {
+                let mut headers = props.headers().clone().unwrap_or_default();
+                super::trace::add_trace_headers(&mut headers, &span);
+                (payload, props.with_headers(headers))
+            })
+            .collect();
+{% endif %}
 
         let ch = self.get_channel().await?;
         let exchange: ShortString = self.exchange.as_ref().into();

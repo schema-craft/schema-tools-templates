@@ -222,15 +222,60 @@ mod tests {
         }
     }
 
+    /// One global subscriber for the whole test binary: lapin event counter + OpenTelemetry.
+    fn init_tracing() {
+        static INIT: Once = Once::new();
+        INIT.call_once(|| {
+            use opentelemetry::trace::TracerProvider as _;
+            use tracing_subscriber::prelude::*;
+            let tracer = opentelemetry_sdk::trace::TracerProvider::builder().build().tracer("test");
+            tracing_subscriber::registry()
+                .with(ConfirmEvents)
+                .with(tracing_opentelemetry::layer().with_tracer(tracer))
+                .init();
+        });
+    }
+
+    /// The handler's span continues the publisher's trace (traceparent travels in the headers).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn trace_context_crosses_the_queue() {
+        use opentelemetry::trace::TraceContextExt;
+        use tracing::Instrument;
+        use tracing_opentelemetry::OpenTelemetrySpanExt;
+        init_tracing();
+        const QUEUE: &str = "tokio_rmq_trace";
+        let m = manager("test-trace");
+        fresh_queue(&m, QUEUE, FieldTable::default()).await;
+        let p = RabbitProducer::new(m.clone(), "").await.unwrap();
+
+        let span = tracing::info_span!("publisher");
+        let sent = span.context().span().span_context().trace_id();
+        p.publish(QUEUE, device("1")).instrument(span).await.unwrap();
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let tx = Arc::new(Mutex::new(Some(tx)));
+        let shutdown = Shutdown::new();
+        let handle = RabbitConsumer::new(QUEUE, 1, (), Some(1), manager("test-trace"))
+            .subscribe(move |_: DeviceCreatedV1, _: ()| {
+                let trace_id = tracing::Span::current().context().span().span_context().trace_id();
+                tx.lock().unwrap().take().map(|tx| tx.send(trace_id));
+                async {}
+            })
+            .start(shutdown.child());
+        let received = tokio::time::timeout(Duration::from_secs(10), rx).await.unwrap().unwrap();
+        shutdown.trigger();
+        handle.await.unwrap();
+        assert_eq!(received, sent);
+
+        p.close().await;
+        m.close().await;
+    }
+
     /// A publish cancelled while waiting for its confirm (client disconnect, timeout) must
     /// not leave the confirm parked on the long-lived channel.
     #[tokio::test(flavor = "multi_thread")]
     async fn cancelled_publish_does_not_park_confirm() {
-        static INIT: Once = Once::new();
-        INIT.call_once(|| {
-            use tracing_subscriber::prelude::*;
-            tracing_subscriber::registry().with(ConfirmEvents).init();
-        });
+        init_tracing();
         let m = manager("test-cancel");
         fresh_queue(&m, "tokio_rmq_cancel", FieldTable::default()).await;
         let p = RabbitProducer::new(m.clone(), "").await.unwrap();
