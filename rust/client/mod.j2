@@ -101,7 +101,7 @@ impl {{ options.name }} {
         let request = self.client.request(Method::{{ endpoint.method | upper }}, &format!("{}{{ endpoint.path | path_parts(to="{}") }}", self.uri
                 {%- for q in endpoint.parameters.path %}
             , path_segment(&{{<property_name name={q.name}/>}}.to_string()).map_err(ClientError::<{{ <endpoint_error_body endpoint={endpoint} options={options}/> }}>::InvalidPathParameter)?
-            {% endfor -%}
+            {%- endfor %}
         ));
 
         // setup headers
